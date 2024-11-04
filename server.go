@@ -66,13 +66,17 @@ func submitJob(c *gin.Context) {
 
 	log.Println("Preparing to execute ZSeeker...")
 	cmd := prepareCommand(params, filePath)
-	log.Printf("Executing command: %s", cmd.String())
+	log.Printf("Executing command: ZSeeker %s", strings.Join(cmd.Args[1:], " "))
 	output, err := cmd.CombinedOutput()
+	log.Printf("Command output:\n%s", string(output))
 	if err != nil {
 		log.Printf("Error executing ZSeeker: %v", err)
-		log.Printf("Command output: %s", string(output))
 		log.Printf("Command error details: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to execute ZSeeker", "details": string(output)})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to execute ZSeeker",
+			"details": string(output),
+			"command": fmt.Sprintf("ZSeeker %s", strings.Join(cmd.Args[1:], " ")),
+		})
 		return
 	}
 
@@ -108,62 +112,81 @@ func submitJob(c *gin.Context) {
 }
 
 func parseParams(c *gin.Context) map[string]interface{} {
-	params := make(map[string]interface{})
+    params := make(map[string]interface{})
 
-	params["GC_weight"], _ = strconv.ParseFloat(c.DefaultPostForm("GC_weight", "7.0"), 64)
-	params["GT_weight"], _ = strconv.ParseFloat(c.DefaultPostForm("GT_weight", "1.0"), 64)
-	params["AC_weight"], _ = strconv.ParseFloat(c.DefaultPostForm("AC_weight", "1.0"), 64)
-	params["AT_weight"], _ = strconv.ParseFloat(c.DefaultPostForm("AT_weight", "0.5"), 64)
-	params["mismatch_penalty_starting_value"], _ = strconv.Atoi(c.DefaultPostForm("mismatch_penalty_starting_value", "1"))
-	params["mismatch_penalty_linear_delta"], _ = strconv.Atoi(c.DefaultPostForm("mismatch_penalty_linear_delta", "2"))
-	params["mismatch_penalty_type"] = c.DefaultPostForm("mismatch_penalty_type", "linear")
-	
-	// Parse consecutive_AT_scoring as a slice of floats
-	consecutiveATScoringStr := c.DefaultPostForm("consecutive_AT_scoring", "0.5,0.5,0.5,0.5,0.0,0.0,-5.0,-100.0")
-	consecutiveATScoringStrs := strings.Split(consecutiveATScoringStr, ",")
-	var consecutiveATScoring []float64
-	for _, v := range consecutiveATScoringStrs {
-		score, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
-		if err == nil {
-			consecutiveATScoring = append(consecutiveATScoring, score)
-		} else {
-			// Handle conversion error (optional)
-			fmt.Printf("Warning: Could not parse '%s' as float: %v\n", v, err)
-		}
-	}
-	
-	params["consecutive_AT_scoring"] = consecutiveATScoring  // Store the slice directly
-	params["n_jobs"], _ = strconv.Atoi(c.DefaultPostForm("n_jobs", "8"))
-	params["cadence_reward"], _ = strconv.ParseFloat(c.DefaultPostForm("cadence_reward", "1.0"), 64)
-	params["method"] = c.DefaultPostForm("method", "transitions")
-	params["threshold"], _ = strconv.Atoi(c.DefaultPostForm("threshold", "50"))
+    params["GC_weight"], _ = strconv.ParseFloat(c.DefaultPostForm("GC_weight", "7.0"), 64)
+    params["GT_weight"], _ = strconv.ParseFloat(c.DefaultPostForm("GT_weight", "1.25"), 64)
+    params["AC_weight"], _ = strconv.ParseFloat(c.DefaultPostForm("AC_weight", "1.25"), 64)
+    params["AT_weight"], _ = strconv.ParseFloat(c.DefaultPostForm("AT_weight", "0.5"), 64)
+    params["mismatch_penalty_starting_value"], _ = strconv.Atoi(c.DefaultPostForm("mismatch_penalty_starting_value", "3"))
+    params["mismatch_penalty_linear_delta"], _ = strconv.Atoi(c.DefaultPostForm("mismatch_penalty_linear_delta", "3"))
+    params["mismatch_penalty_type"] = c.DefaultPostForm("mismatch_penalty_type", "linear")
+    
+    // Parse consecutive_AT_scoring as a slice of floats
+    defaultScoring := "0.5,0.5,0.5,0.5,0.0,0.0,-5.0,-100.0"
+    consecutiveATScoringStr := strings.TrimSpace(c.DefaultPostForm("consecutive_AT_scoring", defaultScoring))
+    consecutiveATScoringStrs := strings.Split(consecutiveATScoringStr, ",")
+    consecutiveATScoring := make([]float64, 0, len(consecutiveATScoringStrs))
+    
+    for _, v := range consecutiveATScoringStrs {
+        score, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+        if err == nil {
+            consecutiveATScoring = append(consecutiveATScoring, score)
+        } else {
+            log.Printf("Warning: Could not parse '%s' as float: %v\n", v, err)
+        }
+    }
+    
+    // If parsing failed completely, use default values
+    if len(consecutiveATScoring) == 0 {
+        defaultValues := []float64{0.5, 0.5, 0.5, 0.5, 0.0, 0.0, -5.0, -100.0}
+        consecutiveATScoring = defaultValues
+    }
+    
+    params["consecutive_AT_scoring"] = consecutiveATScoring
+    params["n_jobs"], _ = strconv.Atoi(c.DefaultPostForm("n_jobs", "8"))
+    params["method"] = c.DefaultPostForm("method", "transitions")
+    params["threshold"], _ = strconv.Atoi(c.DefaultPostForm("threshold", "50"))
 
-	return params
+    return params
 }
+
 
 func prepareCommand(params map[string]interface{}, filePath string) *exec.Cmd {
-	cmdArgs := []string{
-		"--path", filePath,
-		"--GC_weight", fmt.Sprintf("%v", params["GC_weight"]),
-		"--AT_weight", fmt.Sprintf("%v", params["AT_weight"]),
-		"--GT_weight", fmt.Sprintf("%v", params["GT_weight"]),
-		"--AC_weight", fmt.Sprintf("%v", params["AC_weight"]),
-		"--mismatch_penalty_starting_value", fmt.Sprintf("%v", params["mismatch_penalty_starting_value"]),
-		"--mismatch_penalty_linear_delta", fmt.Sprintf("%v", params["mismatch_penalty_linear_delta"]),
-		"--mismatch_penalty_type", params["mismatch_penalty_type"].(string),
-		"--method", params["method"].(string),
-		"--n_jobs", fmt.Sprintf("%v", params["n_jobs"]),
-		"--threshold", fmt.Sprintf("%v", params["threshold"]),
-	}
+    // Convert consecutive_AT_scoring array to the required format
+    consecutiveATScoring := params["consecutive_AT_scoring"].([]float64)
+    atScoringStr := strings.Builder{}
+    for i, score := range consecutiveATScoring {
+        if i > 0 {
+            atScoringStr.WriteString(",")
+        }
+        atScoringStr.WriteString(fmt.Sprintf("%.1f", score)) // Keep %.1f for consecutive_AT_scoring
+    }
 
-	// Handle consecutive_AT_scoring as a list of floats
-	consecutiveATScoring := params["consecutive_AT_scoring"].([]float64)
-	for _, score := range consecutiveATScoring {
-		cmdArgs = append(cmdArgs, "--consecutive_AT_scoring", fmt.Sprintf("%v", score))
-	}
+    cmdArgs := []string{
+        "--fasta", filePath,
+        "--GC_weight", fmt.Sprintf("%.2f", params["GC_weight"]), // Changed to %.2f
+        "--AT_weight", fmt.Sprintf("%.2f", params["AT_weight"]), // Changed to %.2f
+        "--GT_weight", fmt.Sprintf("%.2f", params["GT_weight"]), // Changed to %.2f
+        "--AC_weight", fmt.Sprintf("%.2f", params["AC_weight"]), // Changed to %.2f
+        "--mismatch_penalty_starting_value", fmt.Sprintf("%d", params["mismatch_penalty_starting_value"]),
+        "--mismatch_penalty_linear_delta", fmt.Sprintf("%d", params["mismatch_penalty_linear_delta"]),
+        "--mismatch_penalty_type", params["mismatch_penalty_type"].(string),
+        "--method", params["method"].(string),
+        "--n_jobs", fmt.Sprintf("%d", params["n_jobs"]),
+        "--threshold", fmt.Sprintf("%d", params["threshold"]),
+        "--consecutive_AT_scoring", atScoringStr.String(),
+        "--output_dir", "extractions_zdna_human",
+    }
 
-	return exec.Command("ZSeeker", cmdArgs...)
+    cmd := exec.Command("ZSeeker", cmdArgs...)
+    
+    // Log the complete command for debugging
+    log.Printf("Complete ZSeeker command: ZSeeker %s", strings.Join(cmdArgs, " "))
+    
+    return cmd
 }
+
 
 func saveFile(fileHeader *multipart.FileHeader, destination string) error {
 	log.Println("Saving the uploaded file to disk...")
