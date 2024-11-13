@@ -145,7 +145,6 @@ func parseParams(c *gin.Context) map[string]interface{} {
     
     params["consecutive_AT_scoring"] = consecutiveATScoring
     params["n_jobs"], _ = strconv.Atoi(c.DefaultPostForm("n_jobs", "8"))
-    params["method"] = c.DefaultPostForm("method", "transitions")
     params["threshold"], _ = strconv.Atoi(c.DefaultPostForm("threshold", "50"))
 
     return params
@@ -172,7 +171,6 @@ func prepareCommand(params map[string]interface{}, filePath string) *exec.Cmd {
         "--mismatch_penalty_starting_value", fmt.Sprintf("%d", params["mismatch_penalty_starting_value"]),
         "--mismatch_penalty_linear_delta", fmt.Sprintf("%d", params["mismatch_penalty_linear_delta"]),
         "--mismatch_penalty_type", params["mismatch_penalty_type"].(string),
-        "--method", params["method"].(string),
         "--n_jobs", fmt.Sprintf("%d", params["n_jobs"]),
         "--threshold", fmt.Sprintf("%d", params["threshold"]),
         "--consecutive_AT_scoring", atScoringStr.String(),
